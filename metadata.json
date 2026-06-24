@@ -1,0 +1,6 @@
+{
+  "name": "Driver EPM Roster",
+  "description": "Shift roster and schedule viewer for DT Hanvan drivers, supporting search, schedule tracking, and statistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
