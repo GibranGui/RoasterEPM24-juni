@@ -297,7 +297,7 @@ fun MyShiftTab(
                     ) {
                         StatCard(title = "Cuti Roster (CR)", value = "${stats.leaveRoster}", iconColor = Color(0xFFEF5350), modifier = Modifier.weight(1f))
                         StatCard(title = "Cuti Tahunan (CT)", value = "${stats.leaveAnnual}", iconColor = Color(0xFFE57373), modifier = Modifier.weight(1f))
-                        StatCard(title = "Izin (I)", value = "${stats.permittedAbsence}", iconColor = Color(0xFF64B5F6), modifier = Modifier.weight(1f))
+                        StatCard(title = "Induksi (I)", value = "${stats.permittedAbsence}", iconColor = Color(0xFF64B5F6), modifier = Modifier.weight(1f))
                     }
                 }
 
@@ -624,7 +624,7 @@ fun getShiftStyle(shiftCode: String): Triple<Color, Color, String> {
         "CT" -> Triple(ShiftLeaveBg, ShiftLeaveColor, "CUTI TAHUNAN")
         "CTD" -> Triple(ShiftLeaveBg, ShiftLeaveColor, "CUTI TAHUNAN (S)")
         "CTN" -> Triple(ShiftLeaveBg, ShiftLeaveColor, "CUTI TAHUNAN (M)")
-        "I" -> Triple(Color(0xFFE3F2FD), Color(0xFF1E88E5), "IZIN")
+        "I" -> Triple(Color(0xFFE3F2FD), Color(0xFF1E88E5), "INDUKSI")
         "" -> Triple(Color(0xFFF1F5F9), Color.Gray, "OFF")
         else -> Triple(ShiftOtherBg, ShiftOtherColor, "$shiftCode")
     }

@@ -47,12 +47,22 @@ fun DashboardTab(
             filteredRosters
         } else {
             filteredRosters.filter { roster ->
-                val truckDrivers = allRosters.filter { it.vehicleId == roster.vehicleId }
-                val assignment = getTruckSlotAssignment(truckDrivers, viewModel.todayDayNumber)
-                if (selectedShiftTab == "SIANG") {
-                    assignment.dayDriver?.driverName == roster.driverName
+                if (roster.vehicleId.uppercase().contains("SPARE")) {
+                    val shifts = roster.getShiftsList()
+                    val todayShift = if (viewModel.todayDayNumber <= shifts.size) shifts[viewModel.todayDayNumber - 1].uppercase() else "OFF"
+                    if (selectedShiftTab == "SIANG") {
+                        todayShift == "D" || todayShift == "CTD" || todayShift == "I"
+                    } else {
+                        todayShift == "N" || todayShift == "CTN"
+                    }
                 } else {
-                    assignment.nightDriver?.driverName == roster.driverName
+                    val truckDrivers = allRosters.filter { it.vehicleId == roster.vehicleId }
+                    val assignment = getTruckSlotAssignment(truckDrivers, viewModel.todayDayNumber)
+                    if (selectedShiftTab == "SIANG") {
+                        assignment.dayDrivers.any { it.driverName == roster.driverName }
+                    } else {
+                        assignment.nightDrivers.any { it.driverName == roster.driverName }
+                    }
                 }
             }
         }
@@ -299,7 +309,11 @@ fun DashboardTab(
                 LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(sortedTrucks) { truckId ->
                         // Pass the actual full set of drivers for this truck from allRosters so pairing logic works perfectly!
-                        val drivers = allRosters.filter { it.vehicleId == truckId }
+                        val drivers = if (truckId.uppercase().contains("SPARE")) {
+                            groupedByTruck[truckId] ?: emptyList()
+                        } else {
+                            allRosters.filter { it.vehicleId == truckId }
+                        }
                         TruckSharingCard(
                             truckId = truckId,
                             drivers = drivers,
@@ -510,73 +524,66 @@ fun DriverListItem(
 }
 
 data class TruckSlotAssignment(
-    val dayDriver: RosterEntity?,
-    val dayShiftCode: String,
-    val nightDriver: RosterEntity?,
-    val nightShiftCode: String
+    val dayDrivers: List<RosterEntity>,
+    val dayShiftCodes: List<String>,
+    val nightDrivers: List<RosterEntity>,
+    val nightShiftCodes: List<String>
 )
 
 fun getTruckSlotAssignment(drivers: List<RosterEntity>, todayDay: Int): TruckSlotAssignment {
-    if (drivers.isEmpty()) {
-        return TruckSlotAssignment(null, "", null, "")
-    }
+    val dayDrivers = mutableListOf<RosterEntity>()
+    val dayShiftCodes = mutableListOf<String>()
+    val nightDrivers = mutableListOf<RosterEntity>()
+    val nightShiftCodes = mutableListOf<String>()
     
-    if (drivers.size == 1) {
-        val driver = drivers[0]
+    val offDrivers = mutableListOf<RosterEntity>()
+    val offShiftCodes = mutableListOf<String>()
+
+    for (driver in drivers) {
         val shifts = driver.getShiftsList()
         val shift = if (todayDay <= shifts.size) shifts[todayDay - 1].uppercase() else "OFF"
         
-        return if (shift == "N" || shift == "CTN") {
-            // It's Night shift, so Day is unassigned
-            TruckSlotAssignment(null, "", driver, shift)
+        val isDay = shift == "D" || shift == "CTD" || shift == "I"
+        val isNight = shift == "N" || shift == "CTN"
+        
+        if (isDay) {
+            dayDrivers.add(driver)
+            dayShiftCodes.add(shift)
+        } else if (isNight) {
+            nightDrivers.add(driver)
+            nightShiftCodes.add(shift)
         } else {
-            // Otherwise, we can treat it as Day (or if it's OFF/leave, default to Day)
-            TruckSlotAssignment(driver, shift, null, "")
+            offDrivers.add(driver)
+            offShiftCodes.add(shift)
         }
     }
     
-    // There are 2 drivers
-    val d1 = drivers[0]
-    val d2 = drivers[1]
-    
-    val shifts1 = d1.getShiftsList()
-    val s1 = if (todayDay <= shifts1.size) shifts1[todayDay - 1].uppercase() else "OFF"
-    
-    val shifts2 = d2.getShiftsList()
-    val s2 = if (todayDay <= shifts2.size) shifts2[todayDay - 1].uppercase() else "OFF"
-    
-    val isD1Day = s1 == "D" || s1 == "CTD"
-    val isD2Day = s2 == "D" || s2 == "CTD"
-    val isD1Night = s1 == "N" || s1 == "CTN"
-    val isD2Night = s2 == "N" || s2 == "CTN"
-    
-    // Pairing logic:
-    // 1. One is Day, one is Night
-    if (isD1Day && isD2Night) {
-        return TruckSlotAssignment(d1, s1, d2, s2)
-    }
-    if (isD2Day && isD1Night) {
-        return TruckSlotAssignment(d2, s2, d1, s1)
+    // Assign OFF/leave drivers to the opposite slot of active drivers for balanced pairing
+    if (dayDrivers.isNotEmpty() && nightDrivers.isEmpty()) {
+        nightDrivers.addAll(offDrivers)
+        nightShiftCodes.addAll(offShiftCodes)
+    } else if (nightDrivers.isNotEmpty() && dayDrivers.isEmpty()) {
+        dayDrivers.addAll(offDrivers)
+        dayShiftCodes.addAll(offShiftCodes)
+    } else {
+        // If both are active or neither is active, distribute OFF/leave drivers evenly
+        for (i in offDrivers.indices) {
+            if (i % 2 == 0) {
+                dayDrivers.add(offDrivers[i])
+                dayShiftCodes.add(offShiftCodes[i])
+            } else {
+                nightDrivers.add(offDrivers[i])
+                nightShiftCodes.add(offShiftCodes[i])
+            }
+        }
     }
     
-    // 2. One is Day, the other is CR/OFF/Leave (goes to Night)
-    if (isD1Day && !isD2Day && !isD2Night) {
-        return TruckSlotAssignment(d1, s1, d2, s2)
-    }
-    if (isD2Day && !isD1Day && !isD1Night) {
-        return TruckSlotAssignment(d2, s2, d1, s1)
-    }
-    
-    // 3. One is Night, the other is CR/OFF/Leave (goes to Day)
-    if (isD1Night && !isD2Day && !isD2Night) {
-        return TruckSlotAssignment(d2, s2, d1, s1)
-    }
-    if (isD2Night && !isD1Day && !isD1Night) {
-        return TruckSlotAssignment(d1, s1, d2, s2)
-    }
-    
-    // 4. Default fallback: both OFF/Leave, both Day, or both Night
-    return TruckSlotAssignment(d1, s1, d2, s2)
+    return TruckSlotAssignment(
+        dayDrivers = dayDrivers,
+        dayShiftCodes = dayShiftCodes,
+        nightDrivers = nightDrivers,
+        nightShiftCodes = nightShiftCodes
+    )
 }
 
 @Composable
@@ -586,14 +593,93 @@ fun TruckSharingCard(
     todayDay: Int,
     onDriverClick: (RosterEntity) -> Unit
 ) {
-    val assignment = getTruckSlotAssignment(drivers, todayDay)
-    
-    Card(
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFCAC4D0)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    if (truckId.uppercase().contains("SPARE")) {
+        Card(
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, Color(0xFFCAC4D0)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                // Header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = Color(0xFFEF5350), // Reddish/orange accent for SPARE
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "$truckId (Driver Cadangan)",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+                        color = Color(0xFF1C1B1F)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Driver spare tidak memiliki unit tetap dan pasangan. Berikut status hari ini:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF49454F)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // List all spare drivers
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    drivers.forEach { driver ->
+                        val shifts = driver.getShiftsList()
+                        val todayShift = if (todayDay <= shifts.size) shifts[todayDay - 1] else "OFF"
+                        val (bgColor, textColor, label) = getShiftStyle(todayShift)
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFF7F2FA))
+                                .clickable { onDriverClick(driver) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = driver.driverName,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color(0xFF1C1B1F),
+                                modifier = Modifier.weight(1f)
+                            )
+                            
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(100.dp))
+                                    .background(bgColor)
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "$label (${todayShift.ifEmpty { "OFF" }})",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        val assignment = getTruckSlotAssignment(drivers, todayDay)
+        
+        Card(
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, Color(0xFFCAC4D0)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Truck ID header
             Row(
@@ -622,18 +708,13 @@ fun TruckSharingCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Day Slot
-                val hasDayDriver = assignment.dayDriver != null
+                val hasDayDriver = assignment.dayDrivers.isNotEmpty()
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFFFFF3E0).copy(alpha = 0.4f)) // Light warm orange hue for Day
                         .border(1.dp, Color(0xFFFF9800).copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                        .then(
-                            if (hasDayDriver) {
-                                Modifier.clickable { onDriverClick(assignment.dayDriver!!) }
-                            } else Modifier
-                        )
                         .padding(12.dp)
                 ) {
                     Text(
@@ -647,32 +728,51 @@ fun TruckSharingCard(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     if (hasDayDriver) {
-                        Text(
-                            text = assignment.dayDriver!!.driverName,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1C1B1F),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        val (bgColor, textColor, label) = getShiftStyle(assignment.dayShiftCode)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(100.dp))
-                                .background(bgColor)
-                                .padding(vertical = 4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "$label (${assignment.dayShiftCode.ifEmpty { "OFF" }})",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor,
-                                textAlign = TextAlign.Center
-                            )
+                        assignment.dayDrivers.forEachIndexed { index, driver ->
+                            if (index > 0) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(Color(0xFFFF9800).copy(alpha = 0.15f))
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onDriverClick(driver) }
+                            ) {
+                                Text(
+                                    text = driver.driverName,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1C1B1F),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                
+                                val shiftCode = assignment.dayShiftCodes[index]
+                                val (bgColor, textColor, label) = getShiftStyle(shiftCode)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(100.dp))
+                                        .background(bgColor)
+                                        .padding(vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "$label (${shiftCode.ifEmpty { "OFF" }})",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = textColor,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
                         }
                     } else {
                         Text(
@@ -694,27 +794,22 @@ fun TruckSharingCard(
                             Text(
                                 text = "KOSONG",
                                 fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Gray,
-                                textAlign = TextAlign.Center
-                            )
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Gray,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
                         }
-                    }
-                }
 
                 // Night Slot
-                val hasNightDriver = assignment.nightDriver != null
+                val hasNightDriver = assignment.nightDrivers.isNotEmpty()
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFFF3E5F5).copy(alpha = 0.4f)) // Light purple hue for Night
                         .border(1.dp, Color(0xFF673AB7).copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                        .then(
-                            if (hasNightDriver) {
-                                Modifier.clickable { onDriverClick(assignment.nightDriver!!) }
-                            } else Modifier
-                        )
                         .padding(12.dp)
                 ) {
                     Text(
@@ -728,32 +823,51 @@ fun TruckSharingCard(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     if (hasNightDriver) {
-                        Text(
-                            text = assignment.nightDriver!!.driverName,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1C1B1F),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        val (bgColor, textColor, label) = getShiftStyle(assignment.nightShiftCode)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(100.dp))
-                                .background(bgColor)
-                                .padding(vertical = 4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "$label (${assignment.nightShiftCode.ifEmpty { "OFF" }})",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = textColor,
-                                textAlign = TextAlign.Center
-                            )
+                        assignment.nightDrivers.forEachIndexed { index, driver ->
+                            if (index > 0) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(Color(0xFF673AB7).copy(alpha = 0.15f))
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onDriverClick(driver) }
+                            ) {
+                                Text(
+                                    text = driver.driverName,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1C1B1F),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                
+                                val shiftCode = assignment.nightShiftCodes[index]
+                                val (bgColor, textColor, label) = getShiftStyle(shiftCode)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(100.dp))
+                                        .background(bgColor)
+                                        .padding(vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "$label (${shiftCode.ifEmpty { "OFF" }})",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = textColor,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
                         }
                     } else {
                         Text(
@@ -785,4 +899,5 @@ fun TruckSharingCard(
             }
         }
     }
+}
 }
