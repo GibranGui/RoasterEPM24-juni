@@ -175,10 +175,12 @@ class RosterViewModel(application: Application) : AndroidViewModel(application) 
         try {
             val list = mutableListOf<RosterEntity>()
             val lines = rawText.split("\n")
+            // Match tabs or 2 or more consecutive spaces
+            val splitter = Regex("\\t|\\s{2,}")
             for (line in lines) {
                 val trimmed = line.trim()
                 if (trimmed.isEmpty()) continue
-                val parts = trimmed.split("\t")
+                val parts = trimmed.split(splitter)
                 if (parts.size >= 2) {
                     val name = parts[0].trim().uppercase()
                     val vehicle = parts[1].trim().uppercase()

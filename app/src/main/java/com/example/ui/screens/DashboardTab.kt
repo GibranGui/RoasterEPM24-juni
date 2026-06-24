@@ -304,7 +304,15 @@ fun DashboardTab(
             } else if (isTruckSharingView) {
                 // Group drivers by Truck/Vehicle ID using the active filtered set
                 val groupedByTruck = currentShiftDrivers.groupBy { it.vehicleId }
-                val sortedTrucks = groupedByTruck.keys.toList().sorted()
+                val sortedTrucks = groupedByTruck.keys.toList().sortedWith { t1, t2 ->
+                    val isSpare1 = t1.uppercase().contains("SPARE")
+                    val isSpare2 = t2.uppercase().contains("SPARE")
+                    when {
+                        isSpare1 && !isSpare2 -> -1
+                        !isSpare1 && isSpare2 -> 1
+                        else -> t1.compareTo(t2)
+                    }
+                }
 
                 LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(sortedTrucks) { truckId ->

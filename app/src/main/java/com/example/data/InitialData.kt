@@ -114,10 +114,11 @@ RANDA	DT SPARE	N	N	N	N	N	OFF	CR	CR	CR	CR	CR	CR	CR	CR	CR	CR	CR	CR	I	D	N	N	N	N	N	N
     fun parseInitialRosters(): List<RosterEntity> {
         val list = mutableListOf<RosterEntity>()
         val lines = RAW_ROSTER.split("\n")
+        val splitter = Regex("\\t|\\s{2,}")
         for (line in lines) {
             val trimmed = line.trim()
             if (trimmed.isEmpty()) continue
-            val parts = trimmed.split("\t")
+            val parts = trimmed.split(splitter)
             if (parts.size >= 2) {
                 val name = parts[0].trim()
                 val vehicle = parts[1].trim()

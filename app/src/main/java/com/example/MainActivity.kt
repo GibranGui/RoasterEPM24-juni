@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.RosterViewModel
+import com.example.ui.screens.AboutTab
 import com.example.ui.screens.AnalyticsTab
 import com.example.ui.screens.DashboardTab
 import com.example.ui.screens.MyShiftTab
@@ -131,6 +132,22 @@ fun MainShell(viewModel: RosterViewModel) {
                     ),
                     modifier = Modifier.testTag("nav_tools")
                 )
+
+                // About Tab
+                NavigationBarItem(
+                    selected = activeTab == "About",
+                    onClick = { viewModel.setActiveTab("About") },
+                    icon = { Icon(imageVector = Icons.Default.Info, contentDescription = "Tentang") },
+                    label = { Text("Tentang", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color(0xFF6750A4),
+                        selectedTextColor = Color(0xFF6750A4),
+                        unselectedIconColor = Color(0xFF49454F),
+                        unselectedTextColor = Color(0xFF49454F),
+                        indicatorColor = Color(0xFFE8DEF8)
+                    ),
+                    modifier = Modifier.testTag("nav_about")
+                )
             }
         }
     ) { innerPadding ->
@@ -144,6 +161,7 @@ fun MainShell(viewModel: RosterViewModel) {
                 "My Shift" -> MyShiftTab(viewModel = viewModel)
                 "Dashboard" -> DashboardTab(viewModel = viewModel)
                 "Tools" -> ToolsTab(viewModel = viewModel)
+                "About" -> AboutTab(viewModel = viewModel)
             }
         }
     }
