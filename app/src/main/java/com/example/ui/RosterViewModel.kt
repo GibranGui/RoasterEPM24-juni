@@ -15,9 +15,28 @@ class RosterViewModel(application: Application) : AndroidViewModel(application) 
     private val repository: RosterRepository
     private val sharedPrefs = application.getSharedPreferences("hanvan_roster_prefs", Context.MODE_PRIVATE)
 
-    // Current date values based on user metadata (June 23, 2026)
-    val calendarMonth = "June 2026"
-    val todayDayNumber = 23
+    // Current date values based on Android system time (Indonesian locale)
+    val calendarMonth: String
+        get() {
+            return try {
+                val calendar = java.util.Calendar.getInstance()
+                val sdf = java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale("id", "ID"))
+                sdf.format(calendar.time).split(" ").joinToString(" ") { word ->
+                    word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale("id", "ID")) else it.toString() }
+                }
+            } catch (e: Exception) {
+                "Juni 2026"
+            }
+        }
+
+    val todayDayNumber: Int
+        get() {
+            return try {
+                java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH)
+            } catch (e: Exception) {
+                24
+            }
+        }
 
     // State flows
     private val _searchQuery = MutableStateFlow("")
