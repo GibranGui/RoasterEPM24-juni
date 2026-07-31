@@ -48,13 +48,15 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainShell(viewModel: RosterViewModel) {
     val activeTab by viewModel.activeTab.collectAsState()
+    val isOnline by viewModel.isOnline.collectAsState()
+    val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
                 title = {
-                    Row {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Text(
                             text = "DRIVER EPM",
                             fontWeight = FontWeight.Black,
@@ -71,6 +73,26 @@ fun MainShell(viewModel: RosterViewModel) {
                             fontSize = 20.sp
                         )
                     }
+                },
+                actions = {
+                    AssistChip(
+                        onClick = { viewModel.setActiveTab("Tools") },
+                        label = {
+                            Text(
+                                text = if (isOnline) "ONLINE" else "OFFLINE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isOnline) Color(0xFF2E7D32) else Color(0xFFE65100)
+                            )
+                        },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (isOnline) Color(0xFFE8F5E9) else Color(0xFFFFF3E0)
+                        ),
+                        border = null,
+                        modifier = Modifier
+                            .padding(end = 12.dp)
+                            .testTag("topbar_sync_status_chip")
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.White,

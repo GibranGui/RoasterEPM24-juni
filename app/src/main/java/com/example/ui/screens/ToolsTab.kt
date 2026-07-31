@@ -48,11 +48,16 @@ fun ToolsTab(
 
             // Heading
             Text(
-                text = "ALAT & MANAJEMEN SISTEM",
+                text = "ALAT & SINKRONISASI GOOGLE SHEETS",
                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                 color = Color(0xFF6750A4),
                 modifier = Modifier.padding(bottom = 12.dp)
             )
+
+            // Google Sheets Offline First Sync Section
+            GoogleSheetsSyncSection(viewModel = viewModel)
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Import Section
             Card(

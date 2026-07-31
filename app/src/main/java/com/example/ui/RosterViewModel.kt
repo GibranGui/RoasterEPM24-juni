@@ -5,15 +5,47 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
+import com.example.data.GoogleSheetsSyncManager
 import com.example.data.InitialData
 import com.example.data.RosterEntity
 import com.example.data.RosterRepository
+import com.example.data.SyncLogEntry
+import com.example.data.SyncState
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class RosterViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: RosterRepository
+    val syncManager = GoogleSheetsSyncManager(application)
     private val sharedPrefs = application.getSharedPreferences("hanvan_roster_prefs", Context.MODE_PRIVATE)
+
+    // Sync State Flows
+    private val _syncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
+
+    private val _isOnline = MutableStateFlow(syncManager.isOnline())
+    val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+
+    private val _sheetUrl = MutableStateFlow(syncManager.getSavedSheetUrl())
+    val sheetUrl: StateFlow<String> = _sheetUrl.asStateFlow()
+
+    private val _webhookUrl = MutableStateFlow(syncManager.getWebhookUrl())
+    val webhookUrl: StateFlow<String> = _webhookUrl.asStateFlow()
+
+    private val _lastSyncTime = MutableStateFlow(syncManager.getLastSyncTime())
+    val lastSyncTime: StateFlow<String> = _lastSyncTime.asStateFlow()
+
+    private val _pendingSyncCount = MutableStateFlow(syncManager.getPendingSyncCount())
+    val pendingSyncCount: StateFlow<Int> = _pendingSyncCount.asStateFlow()
+
+    private val _isAutoSyncEnabled = MutableStateFlow(syncManager.isAutoSyncEnabled())
+    val isAutoSyncEnabled: StateFlow<Boolean> = _isAutoSyncEnabled.asStateFlow()
+
+    private val _conflictPolicy = MutableStateFlow(syncManager.getConflictPolicy())
+    val conflictPolicy: StateFlow<String> = _conflictPolicy.asStateFlow()
+
+    private val _syncLogs = MutableStateFlow(syncManager.getSyncLogs())
+    val syncLogs: StateFlow<List<SyncLogEntry>> = _syncLogs.asStateFlow()
 
     // Current date values based on Android system time (Indonesian locale)
     val calendarMonth: String
@@ -143,21 +175,6 @@ class RosterViewModel(application: Application) : AndroidViewModel(application) 
         _activeTab.value = tab
     }
 
-    fun updateRoster(roster: RosterEntity) = viewModelScope.launch {
-        repository.update(roster)
-        // Update detail view if active
-        if (_selectedRosterForDetail.value?.id == roster.id) {
-            _selectedRosterForDetail.value = roster
-        }
-    }
-
-    fun deleteRoster(roster: RosterEntity) = viewModelScope.launch {
-        repository.delete(roster)
-        if (_selectedRosterForDetail.value?.id == roster.id) {
-            _selectedRosterForDetail.value = null
-        }
-    }
-
     fun addRoster(driverName: String, vehicleId: String, shiftsCommaSeparated: String) = viewModelScope.launch {
         val cleanShifts = shiftsCommaSeparated.split(",")
             .map { it.trim().uppercase() }
@@ -169,6 +186,152 @@ class RosterViewModel(application: Application) : AndroidViewModel(application) 
                 shiftsCommaSeparated = cleanShifts
             )
         )
+        syncManager.incrementPendingSync()
+        _pendingSyncCount.value = syncManager.getPendingSyncCount()
+    }
+
+    fun updateRoster(roster: RosterEntity) = viewModelScope.launch {
+        repository.update(roster)
+        syncManager.incrementPendingSync()
+        _pendingSyncCount.value = syncManager.getPendingSyncCount()
+        if (_selectedRosterForDetail.value?.id == roster.id) {
+            _selectedRosterForDetail.value = roster
+        }
+    }
+
+    fun deleteRoster(roster: RosterEntity) = viewModelScope.launch {
+        repository.delete(roster)
+        syncManager.incrementPendingSync()
+        _pendingSyncCount.value = syncManager.getPendingSyncCount()
+        if (_selectedRosterForDetail.value?.id == roster.id) {
+            _selectedRosterForDetail.value = null
+        }
+    }
+
+    // Google Sheets Offline-First Sync Methods
+    fun refreshNetworkStatus() {
+        val online = syncManager.isOnline()
+        _isOnline.value = online
+    }
+
+    fun saveSyncConfig(sheetUrl: String, webhookUrl: String, autoSync: Boolean, policy: String) {
+        syncManager.saveSheetUrl(sheetUrl)
+        syncManager.saveWebhookUrl(webhookUrl)
+        syncManager.setAutoSyncEnabled(autoSync)
+        syncManager.setConflictPolicy(policy)
+
+        _sheetUrl.value = syncManager.getSavedSheetUrl()
+        _webhookUrl.value = syncManager.getWebhookUrl()
+        _isAutoSyncEnabled.value = autoSync
+        _conflictPolicy.value = policy
+    }
+
+    fun fetchAndSyncFromGoogleSheets(targetUrl: String? = null, isAuto: Boolean = false) {
+        viewModelScope.launch {
+            refreshNetworkStatus()
+            val urlToFetch = targetUrl ?: _sheetUrl.value
+            val currentRosterCount = repository.getRosterCount()
+
+            _syncState.value = SyncState.Syncing
+
+            if (!syncManager.isOnline()) {
+                val msg = "Perangkat sedang Offline. Aplikasi menggunakan database lokal Room (${currentRosterCount} driver aktif)."
+                _syncState.value = SyncState.ErrorOffline(msg, currentRosterCount)
+                syncManager.addSyncLog(
+                    action = if (isAuto) "Auto-Sync (Tarik)" else "Tarik Google Sheets",
+                    status = "OFFLINE_CACHED",
+                    details = "Offline - Menggunakan Room DB lokal ($currentRosterCount data)"
+                )
+                _syncLogs.value = syncManager.getSyncLogs()
+                return@launch
+            }
+
+            val result = syncManager.fetchRostersFromGoogleSheets(urlToFetch)
+            result.onSuccess { fetchedList ->
+                if (fetchedList.isNotEmpty()) {
+                    repository.deleteAll()
+                    repository.insertAll(fetchedList)
+                    syncManager.setPendingSyncCount(0)
+
+                    val now = syncManager.getLastSyncTime()
+                    _lastSyncTime.value = now
+                    _pendingSyncCount.value = 0
+                    _syncState.value = SyncState.Success(
+                        message = "Berhasil mengimpor ${fetchedList.size} roster driver dari Google Sheets!",
+                        timestamp = now,
+                        rosterCount = fetchedList.size
+                    )
+                    syncManager.addSyncLog(
+                        action = if (isAuto) "Auto-Sync (Tarik)" else "Tarik Google Sheets",
+                        status = "ONLINE_SUCCESS",
+                        details = "Berhasil memperbarui ${fetchedList.size} driver dari Google Sheets"
+                    )
+                } else {
+                    _syncState.value = SyncState.ErrorNetwork("Data Google Sheets kosong atau tidak memiliki format yang sesuai.")
+                    syncManager.addSyncLog("Tarik Google Sheets", "ERROR", "Format data Google Sheets tidak sesuai")
+                }
+            }.onFailure { exception ->
+                if (exception.message == "PERANGKAT_OFFLINE") {
+                    _syncState.value = SyncState.ErrorOffline(
+                        "Perangkat sedang Offline. Data lokal Room tetap aman dan aktif.",
+                        currentRosterCount
+                    )
+                    syncManager.addSyncLog("Tarik Google Sheets", "OFFLINE_CACHED", "Offline Mode - $currentRosterCount driver lokal")
+                } else {
+                    val errMsg = exception.localizedMessage ?: "Gagal terhubung ke Google Sheets"
+                    _syncState.value = SyncState.ErrorNetwork(errMsg)
+                    syncManager.addSyncLog("Tarik Google Sheets", "ERROR", errMsg)
+                }
+            }
+            _syncLogs.value = syncManager.getSyncLogs()
+        }
+    }
+
+    fun pushLocalDataToGoogleSheets() {
+        viewModelScope.launch {
+            refreshNetworkStatus()
+            val currentRosters = repository.allRosters.first()
+            _syncState.value = SyncState.Syncing
+
+            if (!syncManager.isOnline()) {
+                syncManager.incrementPendingSync()
+                _pendingSyncCount.value = syncManager.getPendingSyncCount()
+                val msg = "Perangkat Offline. Perubahan disimpan di antrean lokal (Pending Sync: ${_pendingSyncCount.value})."
+                _syncState.value = SyncState.ErrorOffline(msg, currentRosters.size)
+                syncManager.addSyncLog("Kirim ke Google Sheets", "OFFLINE_CACHED", "Disimpan di antrean lokal (${_pendingSyncCount.value} pending)")
+                _syncLogs.value = syncManager.getSyncLogs()
+                return@launch
+            }
+
+            val webhook = _webhookUrl.value
+            if (webhook.isBlank()) {
+                _syncState.value = SyncState.ErrorNetwork("URL Webhook Apps Script belum diatur di menu Sinkronisasi.")
+                return@launch
+            }
+
+            val result = syncManager.pushRostersToWebhook(webhook, currentRosters)
+            result.onSuccess { successMsg ->
+                val now = syncManager.getLastSyncTime()
+                _lastSyncTime.value = now
+                _pendingSyncCount.value = 0
+                _syncState.value = SyncState.Success(successMsg, now, currentRosters.size)
+                syncManager.addSyncLog("Kirim ke Google Sheets", "ONLINE_SUCCESS", "Kirim ${currentRosters.size} driver ke Webhook Google Sheets")
+            }.onFailure { ex ->
+                val errMsg = ex.localizedMessage ?: "Gagal push ke Webhook"
+                _syncState.value = SyncState.ErrorNetwork(errMsg)
+                syncManager.addSyncLog("Kirim ke Google Sheets", "ERROR", errMsg)
+            }
+            _syncLogs.value = syncManager.getSyncLogs()
+        }
+    }
+
+    fun exportLocalToCsv(): String {
+        val currentList = allRosters.value
+        return syncManager.exportLocalToCsv(currentList)
+    }
+
+    fun resetSyncState() {
+        _syncState.value = SyncState.Idle
     }
 
     fun parseAndImportRoster(rawText: String): Boolean {

@@ -183,7 +183,7 @@ fun AboutTab(
                             iconColor = Color(0xFF6750A4)
                         )
 
-                        Divider(color = Color(0xFFE0E0E0))
+                        HorizontalDivider(color = Color(0xFFE0E0E0))
 
                         ProfileDetailRow(
                             icon = Icons.Default.Info,
@@ -192,7 +192,7 @@ fun AboutTab(
                             iconColor = Color(0xFF6750A4)
                         )
 
-                        Divider(color = Color(0xFFE0E0E0))
+                        HorizontalDivider(color = Color(0xFFE0E0E0))
 
                         ProfileDetailRow(
                             icon = Icons.Default.CheckCircle,
@@ -201,7 +201,7 @@ fun AboutTab(
                             iconColor = Color(0xFF6750A4)
                         )
 
-                        Divider(color = Color(0xFFE0E0E0))
+                        HorizontalDivider(color = Color(0xFFE0E0E0))
 
                         ProfileDetailRow(
                             icon = Icons.Default.DateRange,
